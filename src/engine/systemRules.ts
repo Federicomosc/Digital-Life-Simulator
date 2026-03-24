@@ -7,29 +7,46 @@ export type SystemRuleResult = {
   readonly reason: string;
 };
 
+/**
+ * Regole di fine turno (Fase 3: bilanciamento più morbido, sinergie leggere).
+ */
 export function evaluateEndTurnRules(
   character: CharacterVariables,
 ): readonly SystemRuleResult[] {
   const out: SystemRuleResult[] = [];
 
-  if (character.happiness < 30) {
+  if (character.happiness < 28) {
     out.push({
-      reason: "Bassa felicita riduce performance lavorativa.",
+      reason: "Stress emotivo: rallenti leggermente in carriera.",
       bundle: [delta("career", -1)],
     });
   }
 
-  if (character.skills >= 60) {
+  if (character.happiness >= 65) {
     out.push({
-      reason: "Skill alte migliorano i guadagni.",
-      bundle: [delta("money", 3)],
+      reason: "Buon umore: collaborazione più facile.",
+      bundle: [delta("relationships", 1)],
     });
   }
 
-  if (character.relationships < 35) {
+  if (character.skills >= 55) {
     out.push({
-      reason: "Relazioni fragili impattano il benessere.",
+      reason: "Competenze solide: piccoli extra da opportunità.",
+      bundle: [delta("money", 2)],
+    });
+  }
+
+  if (character.relationships < 34) {
+    out.push({
+      reason: "Relazioni in affanno: peso sul morale.",
       bundle: [delta("happiness", -1)],
+    });
+  }
+
+  if (character.career >= 45 && character.health < 40) {
+    out.push({
+      reason: "Carriera intensa con salute bassa: rischio affaticamento.",
+      bundle: [delta("happiness", -1), delta("health", -1)],
     });
   }
 
@@ -46,4 +63,3 @@ export function applyEndTurnRules(character: CharacterVariables): {
   }, character);
   return { character: nextCharacter, appliedRules: rules };
 }
-

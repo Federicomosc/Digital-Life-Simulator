@@ -12,7 +12,7 @@ export const EVENT_CATALOG: readonly GameEventDefinition[] = [
       {
         id: "accept-shift",
         label: "Accetta",
-        immediate: [delta("money", 12), delta("happiness", -3), delta("career", 1)],
+        immediate: [delta("money", 10), delta("happiness", -2), delta("career", 1)],
       },
       {
         id: "decline-shift",
@@ -177,7 +177,7 @@ export const EVENT_CATALOG: readonly GameEventDefinition[] = [
       {
         id: "pay-now",
         label: "Paga subito",
-        immediate: [delta("money", -10), delta("happiness", -1)],
+        immediate: [delta("money", -8), delta("happiness", -1)],
       },
       {
         id: "delay-payment",
@@ -191,18 +191,18 @@ export const EVENT_CATALOG: readonly GameEventDefinition[] = [
     id: "breakthrough",
     title: "Breakthrough Professionale",
     description: "Combinazione perfetta: puoi fare un salto importante.",
-    weight: 2,
-    cooldownTurns: 4,
+    weight: 3,
+    cooldownTurns: 3,
     conditions: [
-      { type: "stat", rule: { stat: "skills", op: "gte", value: 60 } },
-      { type: "stat", rule: { stat: "career", op: "gte", value: 55 } },
+      { type: "stat", rule: { stat: "skills", op: "gte", value: 58 } },
+      { type: "stat", rule: { stat: "career", op: "gte", value: 52 } },
       { type: "milestone", milestoneId: "skills-solid" },
     ],
     choices: [
       {
         id: "go-all-in",
         label: "Dai tutto",
-        immediate: [delta("career", 10), delta("money", 20), delta("health", -6)],
+        immediate: [delta("career", 8), delta("money", 18), delta("health", -5)],
       },
       {
         id: "play-safe",
@@ -227,6 +227,230 @@ export const EVENT_CATALOG: readonly GameEventDefinition[] = [
         id: "solo-weekend",
         label: "Weekend tranquillo",
         immediate: [delta("health", 3), delta("happiness", 1)],
+      },
+    ],
+  },
+  {
+    id: "burnout-check",
+    title: "Segnali di Burnout",
+    description:
+      "Stai spingendo forte in carriera ma il carico emotivo si fa sentire.",
+    tags: ["stress", "late"],
+    weight: 4,
+    cooldownTurns: 3,
+    conditions: [
+      { type: "stat", rule: { stat: "career", op: "gte", value: 38 } },
+      { type: "stat", rule: { stat: "happiness", op: "lte", value: 38 } },
+    ],
+    choices: [
+      {
+        id: "scale-back",
+        label: "Riduci il ritmo",
+        immediate: [delta("career", -2), delta("happiness", 5), delta("health", 3)],
+      },
+      {
+        id: "push-on",
+        label: "Continua così",
+        immediate: [delta("career", 2), delta("happiness", -3), delta("health", -3)],
+        delayed: [{ delayTurns: 2, bundle: [delta("health", -2)] }],
+      },
+    ],
+  },
+  {
+    id: "side-hustle",
+    title: "Progetto Collaterale",
+    description: "Potresti monetizzare un hobby o una piccola idea.",
+    weight: 5,
+    cooldownTurns: 2,
+    conditions: [{ type: "stat", rule: { stat: "skills", op: "gte", value: 28 } }],
+    choices: [
+      {
+        id: "launch",
+        label: "Lancia il progetto",
+        immediate: [delta("money", 8), delta("happiness", -2), delta("skills", 2)],
+        delayed: [{ delayTurns: 1, bundle: [delta("money", 5)] }],
+      },
+      {
+        id: "pass",
+        label: "Non è il momento",
+        immediate: [delta("happiness", 1)],
+      },
+    ],
+  },
+  {
+    id: "family-dinner",
+    title: "Cena in Famiglia",
+    description: "Ti invitano a passare una serata insieme.",
+    weight: 6,
+    cooldownTurns: 2,
+    conditions: [{ type: "stat", rule: { stat: "turn", op: "gte", value: 5 } }],
+    choices: [
+      {
+        id: "go-dinner",
+        label: "Ci vado",
+        immediate: [delta("relationships", 4), delta("happiness", 3), delta("money", -6)],
+      },
+      {
+        id: "skip-dinner",
+        label: "Declina educatamente",
+        immediate: [delta("relationships", -2), delta("career", 1)],
+      },
+    ],
+  },
+  {
+    id: "work-from-home",
+    title: "Smart Working",
+    description: "Puoi lavorare da casa per qualche giorno.",
+    weight: 7,
+    cooldownTurns: 1,
+    choices: [
+      {
+        id: "wfh-focus",
+        label: "Focus totale",
+        immediate: [delta("skills", 3), delta("happiness", 1), delta("relationships", -1)],
+      },
+      {
+        id: "wfh-relax",
+        label: "Approfitta per rilassarti",
+        immediate: [delta("health", 4), delta("happiness", 2), delta("career", -1)],
+      },
+    ],
+  },
+  {
+    id: "peer-comparison",
+    title: "Confronto con i Par",
+    description: "Vedi i successi altrui e ti chiedi se stai andando abbastanza forte.",
+    weight: 4,
+    cooldownTurns: 2,
+    conditions: [{ type: "stat", rule: { stat: "relationships", op: "lt", value: 48 } }],
+    choices: [
+      {
+        id: "reach-out",
+        label: "Scrivi a qualcuno",
+        immediate: [delta("relationships", 3), delta("happiness", -1)],
+      },
+      {
+        id: "double-down",
+        label: "Ti sproni a fare di più",
+        immediate: [delta("career", 2), delta("happiness", -3)],
+      },
+    ],
+  },
+  {
+    id: "certification-course",
+    title: "Corso di Certificazione",
+    description: "Un percorso costoso ma utile per il curriculum.",
+    weight: 4,
+    cooldownTurns: 3,
+    conditions: [{ type: "stat", rule: { stat: "money", op: "gte", value: 25 } }],
+    choices: [
+      {
+        id: "enroll",
+        label: "Iscriviti",
+        immediate: [delta("money", -22), delta("skills", 6), delta("career", 2)],
+      },
+      {
+        id: "later",
+        label: "Rimanda",
+        immediate: [delta("happiness", -1)],
+      },
+    ],
+  },
+  {
+    id: "serendipity",
+    title: "Piccola Occasione",
+    description: "Qualcosa di inatteso ti sorride.",
+    tags: ["luck"],
+    weight: 2,
+    cooldownTurns: 4,
+    choices: [
+      {
+        id: "take-it",
+        label: "Cogli l'occasione",
+        immediate: [delta("money", 6), delta("happiness", 2)],
+      },
+      {
+        id: "ignore",
+        label: "Lascia perdere",
+        immediate: [delta("happiness", -1)],
+      },
+    ],
+  },
+  {
+    id: "leadership-draft",
+    title: "Bozza di Leadership",
+    description: "Ti chiedono di coordinare un piccolo team.",
+    weight: 3,
+    cooldownTurns: 3,
+    conditions: [
+      { type: "milestone", milestoneId: "career-veteran" },
+      { type: "stat", rule: { stat: "relationships", op: "gte", value: 45 } },
+    ],
+    choices: [
+      {
+        id: "accept-lead",
+        label: "Accetti il ruolo",
+        immediate: [delta("career", 5), delta("money", 10), delta("happiness", -2)],
+      },
+      {
+        id: "defer-lead",
+        label: "Chiedi tempo",
+        immediate: [delta("happiness", 2), delta("career", -1)],
+      },
+    ],
+  },
+  {
+    id: "wellness-retreat",
+    title: "Weekend Benessere",
+    description: "Una proposta per recuperare energia.",
+    weight: 3,
+    cooldownTurns: 3,
+    conditions: [
+      { type: "stat", rule: { stat: "health", op: "lt", value: 52 } },
+      { type: "stat", rule: { stat: "money", op: "gte", value: 30 } },
+    ],
+    choices: [
+      {
+        id: "book-retreat",
+        label: "Prenota",
+        immediate: [delta("money", -28), delta("health", 10), delta("happiness", 4)],
+      },
+      {
+        id: "diy-rest",
+        label: "Riposo fai-da-te",
+        immediate: [delta("health", 4), delta("money", -5)],
+      },
+    ],
+  },
+  {
+    id: "investment-tip",
+    title: "Suggerimento Finanziario",
+    description:
+      "Un collega parla di un'opportunità con rischio e possibile guadagno.",
+    weight: 3,
+    cooldownTurns: 3,
+    conditions: [{ type: "stat", rule: { stat: "money", op: "gte", value: 40 } }],
+    choices: [
+      {
+        id: "invest-safe",
+        label: "Investi poco",
+        immediate: [delta("money", -4), delta("happiness", 1)],
+      },
+      {
+        id: "invest-risk",
+        label: "Tenti la sorte",
+        immediate: [delta("money", -20), delta("happiness", -2)],
+        delayed: [
+          {
+            delayTurns: 2,
+            bundle: [delta("money", 18)],
+          },
+        ],
+      },
+      {
+        id: "pass-invest",
+        label: "Non ti interessa",
+        immediate: [delta("happiness", 1)],
       },
     ],
   },

@@ -26,6 +26,7 @@ import { computeUnlockedMilestones } from "@/engine/progressionManager";
 const STORAGE_VERSION = 2;
 const FALLBACK_EVENT_ID = "starter-shift";
 const MAX_HISTORY = 40;
+const PERSIST_STORAGE_KEY = "digital-life-simulator-game";
 
 type EventHistoryEntry = {
   readonly turn: number;
@@ -84,6 +85,12 @@ export type GameStore = {
 
   /** Ripristina i valori di default (nuova partita / debug). */
   resetCharacter: () => void;
+
+  /** Rimuove il salvataggio LocalStorage e resetta la partita. */
+  clearSave: () => void;
+
+  /** Ultima azione (feedback accessibile; non persistito). */
+  lastActionMessage: string | null;
 };
 
 function appendHistory<T>(list: T[], item: T): T[] {
@@ -152,6 +159,7 @@ export const useGameStore = create<GameStore>()(
   persist(
     (set) => ({
       ...buildInitialState(),
+      lastActionMessage: null,
 
       updateVariable: (key, value) =>
         set((s) => ({
@@ -216,6 +224,9 @@ export const useGameStore = create<GameStore>()(
             unlockedMilestones: s.unlockedMilestones,
           });
           if (!outcome) return s;
+
+          const choiceLabel =
+            currentEvent.choices.find((c) => c.id === choiceId)?.label ?? choiceId;
 
           const immediateCharacter = applyEffectsToCharacter(
             s.character,
@@ -295,14 +306,24 @@ export const useGameStore = create<GameStore>()(
             eventHistory,
             effectHistory,
             unlockedMilestones,
+            lastActionMessage: `Turno ${newTurn}: scelta «${choiceLabel}». Prossimo evento in arrivo.`,
           };
         }),
 
       resetCharacter: () =>
-        set(() => buildInitialState()),
+        set(() => ({ ...buildInitialState(), lastActionMessage: null })),
+
+      clearSave: () => {
+        try {
+          localStorage.removeItem(PERSIST_STORAGE_KEY);
+        } catch {
+          /* storage non disponibile */
+        }
+        set(() => ({ ...buildInitialState(), lastActionMessage: null }));
+      },
     }),
     {
-      name: "digital-life-simulator-game",
+      name: PERSIST_STORAGE_KEY,
       version: STORAGE_VERSION,
       migrate: (persistedState: unknown, version: number) => {
         const current = persistedState as Partial<PersistedStateV2> &
