@@ -4,5 +4,6 @@
  */
 
 export function placeholderEngineTick(_deltaMs: number): void {
-  // hook per tick futuri
+  // hook per tick futuri (parametro ignorato per ora)
+  void _deltaMs;
 }

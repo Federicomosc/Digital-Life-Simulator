@@ -1,12 +1,12 @@
-import { delta } from "@/data/effects";
+import { getHardcodedEvent } from "@/engine/coreLoop";
 import { useGameStore } from "@/store/useGameStore";
 
 export function CounterBadge() {
   const character = useGameStore((s) => s.character);
-  const nextTurn = useGameStore((s) => s.nextTurn);
-  const updateVariable = useGameStore((s) => s.updateVariable);
-  const applyEffects = useGameStore((s) => s.applyEffects);
   const resetCharacter = useGameStore((s) => s.resetCharacter);
+  const pendingCount = useGameStore((s) => s.pendingEffects.length);
+  const choose = useGameStore((s) => s.choose);
+  const event = getHardcodedEvent(character);
 
   return (
     <div className="flex flex-col items-center gap-4 max-w-md w-full">
@@ -14,6 +14,10 @@ export function CounterBadge() {
         <div className="flex justify-between">
           <dt>turn</dt>
           <dd className="text-emerald-400">{character.turn}</dd>
+        </div>
+        <div className="flex justify-between">
+          <dt>pendingEffects</dt>
+          <dd>{pendingCount}</dd>
         </div>
         <div className="flex justify-between">
           <dt>health</dt>
@@ -28,36 +32,31 @@ export function CounterBadge() {
           <dd>{character.money}</dd>
         </div>
       </dl>
-      <div className="flex flex-wrap justify-center gap-2">
-        <button
-          type="button"
-          onClick={() => nextTurn()}
-          className="rounded-md bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
-        >
-          Prossimo turno
-        </button>
-        <button
-          type="button"
-          onClick={() => updateVariable("health", 100)}
-          className="rounded-md bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
-        >
-          Salute → 100
-        </button>
-        <button
-          type="button"
-          onClick={() => applyEffects([delta("happiness", 2)])}
-          className="rounded-md bg-emerald-700 px-3 py-2 text-sm text-white hover:bg-emerald-600"
-        >
-          +2 felicità (bundle)
-        </button>
-        <button
-          type="button"
-          onClick={() => resetCharacter()}
-          className="rounded-md border border-slate-600 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
-        >
-          Reset
-        </button>
+
+      <div className="w-full rounded-lg border border-slate-800 bg-slate-950 px-4 py-4">
+        <h2 className="text-lg font-semibold text-slate-100">{event.title}</h2>
+        <p className="mt-1 text-sm text-slate-400">{event.description}</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {event.choices.map((choice) => (
+            <button
+              key={choice.id}
+              type="button"
+              onClick={() => choose(choice.id)}
+              className="rounded-md bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
+            >
+              {choice.label}
+            </button>
+          ))}
+        </div>
       </div>
+
+      <button
+        type="button"
+        onClick={() => resetCharacter()}
+        className="rounded-md border border-slate-600 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 w-full"
+      >
+        Reset
+      </button>
     </div>
   );
 }
