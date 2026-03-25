@@ -1,10 +1,13 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { PersistStorage, StorageValue } from "zustand/middleware/persist";
+import { updateArchetypeAggregates } from "@/store/archetypeAggregates";
 import {
   type CharacterVariableKey,
   type CharacterVariables,
-  DEFAULT_CHARACTER_VARIABLES,
 } from "@/data/character";
+import type { ArchetypeId } from "@/data/archetypes";
+import { getArchetypeDefinition } from "@/data/archetypes";
 import { EVENT_CATALOG } from "@/data/events.seed";
 import { type EffectBundle } from "@/data/effects";
 import type { DelayedEffectDefinition } from "@/data/events";
@@ -20,13 +23,28 @@ import {
   type ChoiceId,
 } from "@/engine/coreLoop";
 import { applyEndTurnRules } from "@/engine/systemRules";
-import { selectNextEvent, type EventCooldownMap } from "@/engine/eventManager";
+import {
+  selectNextEvent,
+  type CharacterFlags,
+  type EventCooldownMap,
+} from "@/engine/eventManager";
 import { computeUnlockedMilestones } from "@/engine/progressionManager";
+import type { TurnSnapshot, PlayerStats } from "@/data/history";
+import { ACHIEVEMENTS } from "@/data/achievements";
+import { evaluateAchievements } from "@/engine/achievementsEngine";
+import { selectFinal } from "@/engine/finalsEngine";
+import {
+  getActiveSlotStorageKey,
+  ACTIVE_ARCHETYPE_KEY,
+  ACTIVE_SLOT_KEY,
+} from "@/store/slotStorage";
 
-const STORAGE_VERSION = 2;
+const STORAGE_VERSION = 5;
 const FALLBACK_EVENT_ID = "starter-shift";
 const MAX_HISTORY = 40;
-const PERSIST_STORAGE_KEY = "digital-life-simulator-game";
+const BASE_PERSIST_NAME = "digital-life-simulator-game";
+const MAX_TURN_SNAPSHOTS = 500;
+const MAX_GAME_TURNS = 30;
 
 type EventHistoryEntry = {
   readonly turn: number;
@@ -41,14 +59,22 @@ type EffectHistoryEntry = {
   readonly effects: EffectBundle;
 };
 
-type PersistedStateV2 = {
+type PersistedStateV3 = {
   character: CharacterVariables;
   pendingEffects: DelayedEffect[];
+  archetypeId: ArchetypeId;
+  flags: CharacterFlags;
   currentEventId: string;
   eventCooldowns: EventCooldownMap;
   eventHistory: EventHistoryEntry[];
   effectHistory: EffectHistoryEntry[];
   unlockedMilestones: string[];
+  saveVersion: number;
+  history: TurnSnapshot[];
+  gamePhase: "playing" | "ended";
+  finalId: string | null;
+  finalText: string | null;
+  unlockedAchievements: string[];
 };
 
 type PersistedStateV1 = {
@@ -59,6 +85,8 @@ type PersistedStateV1 = {
 export type GameStore = {
   /** Istantanea corrente delle variabili del personaggio (fonte di verità). */
   character: CharacterVariables;
+  archetypeId: ArchetypeId;
+  flags: CharacterFlags;
   currentEventId: string;
   eventCooldowns: EventCooldownMap;
   eventHistory: EventHistoryEntry[];
@@ -91,6 +119,18 @@ export type GameStore = {
 
   /** Ultima azione (feedback accessibile; non persistito). */
   lastActionMessage: string | null;
+
+  /** Versione “in-game” salvata nello stato (non solo quella del middleware). */
+  saveVersion: number;
+
+  /** Snapshot dello stato di gioco a fine turno (per grafici e analisi). */
+  history: TurnSnapshot[];
+
+  gamePhase: "playing" | "ended";
+  finalId: string | null;
+  finalText: string | null;
+
+  unlockedAchievements: string[];
 };
 
 function appendHistory<T>(list: T[], item: T): T[] {
@@ -115,6 +155,8 @@ function pickNextEventId(params: {
   character: CharacterVariables;
   unlockedMilestones: readonly string[];
   eventCooldowns: EventCooldownMap;
+  archetypeId: ArchetypeId;
+  flags: CharacterFlags;
 }): string {
   return selectNextEvent({
     catalog: EVENT_CATALOG,
@@ -122,6 +164,8 @@ function pickNextEventId(params: {
     unlockedMilestones: params.unlockedMilestones,
     cooldowns: params.eventCooldowns,
     fallbackEventId: FALLBACK_EVENT_ID,
+    archetypeId: params.archetypeId,
+    flags: params.flags,
   }).id;
 }
 
@@ -129,31 +173,108 @@ function buildInitialState(): Pick<
   GameStore,
   | "character"
   | "pendingEffects"
+  | "archetypeId"
+  | "flags"
   | "currentEventId"
   | "eventCooldowns"
   | "eventHistory"
   | "effectHistory"
   | "unlockedMilestones"
+  | "saveVersion"
+  | "history"
+  | "gamePhase"
+  | "finalId"
+  | "finalText"
+  | "unlockedAchievements"
 > {
+  let archetypeId: ArchetypeId = "worker";
+  try {
+    const raw = localStorage.getItem(ACTIVE_ARCHETYPE_KEY) as ArchetypeId | null;
+    if (raw === "student" || raw === "worker" || raw === "artist") {
+      archetypeId = raw;
+    }
+  } catch {
+    /* ignore */
+  }
+  const flags: CharacterFlags = {};
+  const character = getArchetypeDefinition(archetypeId).initialCharacter;
+
   const unlockedMilestones = computeUnlockedMilestones({
-    character: DEFAULT_CHARACTER_VARIABLES,
+    character,
     unlockedMilestones: [],
   });
+
   const currentEventId = pickNextEventId({
-    character: DEFAULT_CHARACTER_VARIABLES,
+    character,
     unlockedMilestones,
     eventCooldowns: {},
+    archetypeId,
+    flags,
   });
   return {
-    character: { ...DEFAULT_CHARACTER_VARIABLES },
+    character: { ...character },
     pendingEffects: [],
+    archetypeId,
+    flags,
     currentEventId,
     eventCooldowns: {},
     eventHistory: [],
     effectHistory: [],
     unlockedMilestones,
+    saveVersion: STORAGE_VERSION,
+    history: [],
+    gamePhase: "playing",
+    finalId: null,
+    finalText: null,
+    unlockedAchievements: [],
   };
 }
+
+function statsFromCharacter(character: CharacterVariables): PlayerStats {
+  return {
+    health: character.health,
+    happiness: character.happiness,
+    money: character.money,
+    career: character.career,
+    relationships: character.relationships,
+    skills: character.skills,
+  };
+}
+
+function appendHistorySnapshot(
+  list: TurnSnapshot[],
+  item: TurnSnapshot,
+): TurnSnapshot[] {
+  return [...list, item].slice(-MAX_TURN_SNAPSHOTS);
+}
+
+const slotPersistStorage: PersistStorage<PersistedStateV3, void> = {
+  getItem: (_name: string) => {
+    void _name;
+    const key = getActiveSlotStorageKey();
+    if (!key) return null;
+
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as StorageValue<PersistedStateV3>;
+    } catch {
+      return null;
+    }
+  },
+  setItem: (_name: string, value: StorageValue<PersistedStateV3>) => {
+    void _name;
+    const key = getActiveSlotStorageKey();
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(value));
+  },
+  removeItem: (_name: string) => {
+    void _name;
+    const key = getActiveSlotStorageKey();
+    if (!key) return;
+    localStorage.removeItem(key);
+  },
+};
 
 export const useGameStore = create<GameStore>()(
   persist(
@@ -214,8 +335,13 @@ export const useGameStore = create<GameStore>()(
 
       choose: (choiceId) =>
         set((s) => {
+          if (s.gamePhase === "ended") return s;
+
           const currentEvent = getEventById(s.currentEventId);
           if (!currentEvent) return s;
+
+          const choiceDef = currentEvent.choices.find((c) => c.id === choiceId);
+          if (!choiceDef) return s;
 
           const outcome = resolveChoiceFromEvent({
             eventDef: currentEvent,
@@ -224,6 +350,15 @@ export const useGameStore = create<GameStore>()(
             unlockedMilestones: s.unlockedMilestones,
           });
           if (!outcome) return s;
+
+          // 2) Applica le variazioni permanenti di stato narrativo (flags) dalla scelta.
+          const nextFlags: CharacterFlags = { ...s.flags };
+          if (choiceDef.setsFlags) {
+            for (const f of choiceDef.setsFlags) nextFlags[f] = true;
+          }
+          if (choiceDef.removesFlags) {
+            for (const f of choiceDef.removesFlags) delete nextFlags[f];
+          }
 
           const choiceLabel =
             currentEvent.choices.find((c) => c.id === choiceId)?.label ?? choiceId;
@@ -234,79 +369,184 @@ export const useGameStore = create<GameStore>()(
           );
           const delayedEffects = mapDelayedEffects(outcome.delayed, s.character.turn);
 
-          const newTurn = nextTurnValue(s.character.turn, 1);
-          const withNewTurn: CharacterVariables = {
-            ...immediateCharacter,
-            turn: newTurn,
-          };
+          const timeCost = Math.max(1, Math.floor(choiceDef.timeCost ?? 1));
+          const choiceIndex = currentEvent.choices.findIndex(
+            (c) => c.id === choiceId,
+          );
 
-          const withDelayed = applyDueDelayedEffects({
-            character: withNewTurn,
-            pendingEffects: [...s.pendingEffects, ...delayedEffects],
-            currentTurn: newTurn,
-          });
+          let turn = s.character.turn;
+          let character = immediateCharacter;
+          let pendingEffects = [...s.pendingEffects, ...delayedEffects];
+          let unlockedMilestones = s.unlockedMilestones;
+          let history = s.history;
+          let unlockedAchievements = s.unlockedAchievements;
+          let gamePhase: "playing" | "ended" = s.gamePhase;
+          let finalId: string | null = s.finalId;
+          let finalText: string | null = s.finalText;
 
-          const rulesResult = applyEndTurnRules(withDelayed.character);
-          const characterAfterRules = rulesResult.character;
+          let newlyUnlockedAchievementIds: string[] = [];
 
-          const unlockedMilestones = computeUnlockedMilestones({
-            character: characterAfterRules,
-            unlockedMilestones: s.unlockedMilestones,
-          });
-
-          const eventCooldowns: EventCooldownMap = {
-            ...s.eventCooldowns,
-            [currentEvent.id]: newTurn,
-          };
-
-          const nextEventId = pickNextEventId({
-            character: characterAfterRules,
-            unlockedMilestones,
-            eventCooldowns,
-          });
-
-          let effectHistory = appendHistory(s.effectHistory, {
-            turn: newTurn,
-            source: "choice-immediate",
+          // Effect history (immediate e delayed) registrata a fine scelta.
+          let effectHistory: EffectHistoryEntry[] = appendHistory(
+            s.effectHistory,
+            {
+            turn: turn + timeCost,
+            source: "choice-immediate" as const,
             description: `${currentEvent.id}/${choiceId}`,
             effects: outcome.immediate,
-          });
+            },
+          );
 
           if (delayedEffects.length > 0) {
             for (const delayed of delayedEffects) {
               effectHistory = appendHistory(effectHistory, {
                 turn: delayed.executeTurn,
-                source: "choice-delayed",
+                source: "choice-delayed" as const,
                 description: `${currentEvent.id}/${choiceId}`,
                 effects: delayed.bundle,
               });
             }
           }
 
-          for (const rule of rulesResult.appliedRules) {
-            effectHistory = appendHistory(effectHistory, {
-              turn: newTurn,
-              source: "system-rule",
-              description: rule.reason,
-              effects: rule.bundle,
+          for (let step = 0; step < timeCost; step += 1) {
+            turn = nextTurnValue(turn, 1);
+            character = { ...character, turn };
+
+            const withDelayed = applyDueDelayedEffects({
+              character,
+              pendingEffects,
+              currentTurn: turn,
             });
+
+            pendingEffects = withDelayed.pendingEffects;
+
+            const rulesResult = applyEndTurnRules(withDelayed.character);
+            character = rulesResult.character;
+
+            // System rule history per ogni fine turno.
+            for (const rule of rulesResult.appliedRules) {
+              effectHistory = appendHistory(effectHistory, {
+                turn,
+                source: "system-rule" as const,
+                description: rule.reason,
+                effects: rule.bundle,
+              });
+            }
+
+            unlockedMilestones = computeUnlockedMilestones({
+              character,
+              unlockedMilestones,
+            });
+
+            history = appendHistorySnapshot(history, {
+              turn,
+              stats: statsFromCharacter(character),
+              eventId: currentEvent.id,
+              choiceIndex: choiceIndex < 0 ? 0 : choiceIndex,
+            });
+
+            const mappedEffectHistory = effectHistory.map((e) => ({
+              source: e.source,
+              effects: e.effects.map((eff) => ({
+                target: eff.target,
+                op: eff.op,
+                value: eff.value,
+              })),
+            }));
+
+            const achievementResult = evaluateAchievements({
+              achievements: ACHIEVEMENTS,
+              alreadyUnlocked: unlockedAchievements,
+              state: {
+                character,
+                archetypeId: s.archetypeId,
+                flags: nextFlags,
+                turn,
+                history,
+                effectHistory: mappedEffectHistory,
+              },
+            });
+
+            if (achievementResult.newlyUnlocked.length > 0) {
+              unlockedAchievements = [
+                ...unlockedAchievements,
+                ...achievementResult.newlyUnlocked,
+              ];
+              newlyUnlockedAchievementIds = [
+                ...newlyUnlockedAchievementIds,
+                ...achievementResult.newlyUnlocked,
+              ];
+            }
+
+            // Condizione epilogo: termina la partita a un limite di turni o se il personaggio si “rompe”.
+            if (turn >= MAX_GAME_TURNS || character.health <= 0) {
+              gamePhase = "ended";
+              const final = selectFinal({
+                character,
+                archetypeId: s.archetypeId,
+                flags: nextFlags,
+                history,
+                unlockedMilestonesCount: unlockedMilestones.length,
+              });
+              finalId = final.id;
+              finalText = final.text;
+
+              // Aggiorna le medie globali “per archetipo” (usate dalla dashboard).
+              updateArchetypeAggregates({
+                archetypeId: s.archetypeId,
+                finalStats: statsFromCharacter(character),
+              });
+              break;
+            }
           }
 
+          const eventCooldowns: EventCooldownMap = {
+            ...s.eventCooldowns,
+            [currentEvent.id]: turn,
+          };
+
+          // Event selection solo se la partita continua.
+          const nextEventId =
+            gamePhase === "ended"
+              ? s.currentEventId
+              : choiceDef.nextEventId ??
+                pickNextEventId({
+                  character,
+                  unlockedMilestones,
+                  eventCooldowns,
+                  flags: nextFlags,
+                  archetypeId: s.archetypeId,
+                });
+
           const eventHistory = appendHistory(s.eventHistory, {
-            turn: newTurn,
+            turn,
             eventId: currentEvent.id,
             choiceId,
           });
 
           return {
-            character: characterAfterRules,
-            pendingEffects: withDelayed.pendingEffects,
+            character,
+            archetypeId: s.archetypeId,
+            flags: nextFlags,
+            pendingEffects,
             currentEventId: nextEventId,
             eventCooldowns,
             eventHistory,
             effectHistory,
             unlockedMilestones,
-            lastActionMessage: `Turno ${newTurn}: scelta «${choiceLabel}». Prossimo evento in arrivo.`,
+            history,
+            gamePhase,
+            finalId,
+            finalText,
+            unlockedAchievements,
+            lastActionMessage:
+              gamePhase === "ended"
+                ? `Finale sbloccato: ${finalId ?? "—"}.`
+                : `Turno ${turn}: scelta «${choiceLabel}». Prossimo evento in arrivo.${
+                    newlyUnlockedAchievementIds.length > 0
+                      ? ` Achievement: ${newlyUnlockedAchievementIds.join(", ")}.`
+                      : ""
+                  }`,
           };
         }),
 
@@ -315,7 +555,9 @@ export const useGameStore = create<GameStore>()(
 
       clearSave: () => {
         try {
-          localStorage.removeItem(PERSIST_STORAGE_KEY);
+          const activeKey = getActiveSlotStorageKey();
+          if (activeKey) localStorage.removeItem(activeKey);
+          localStorage.removeItem(ACTIVE_SLOT_KEY);
         } catch {
           /* storage non disponibile */
         }
@@ -323,56 +565,52 @@ export const useGameStore = create<GameStore>()(
       },
     }),
     {
-      name: PERSIST_STORAGE_KEY,
+      name: BASE_PERSIST_NAME,
       version: STORAGE_VERSION,
-      migrate: (persistedState: unknown, version: number) => {
-        const current = persistedState as Partial<PersistedStateV2> &
+      storage: slotPersistStorage,
+      migrate: (persistedState: unknown, _version: number) => {
+        void _version;
+        const current = persistedState as Partial<PersistedStateV3> &
           Partial<PersistedStateV1>;
-
-        if (version < 2) {
-          const seed = buildInitialState();
-          const character = current.character ?? seed.character;
-          const pendingEffects = current.pendingEffects ?? seed.pendingEffects;
-          const unlockedMilestones = computeUnlockedMilestones({
-            character,
-            unlockedMilestones: [],
-          });
-          const currentEventId = pickNextEventId({
-            character,
-            unlockedMilestones,
-            eventCooldowns: {},
-          });
-          const upgraded: PersistedStateV2 = {
-            character,
-            pendingEffects,
-            currentEventId,
-            eventCooldowns: {},
-            eventHistory: [],
-            effectHistory: [],
-            unlockedMilestones,
-          };
-          return upgraded;
-        }
-
         const seed = buildInitialState();
         return {
           character: current.character ?? seed.character,
           pendingEffects: current.pendingEffects ?? seed.pendingEffects,
+          archetypeId: (current as Partial<PersistedStateV3>).archetypeId ?? seed.archetypeId,
+          flags: (current as Partial<PersistedStateV3>).flags ?? seed.flags,
           currentEventId: current.currentEventId ?? seed.currentEventId,
           eventCooldowns: current.eventCooldowns ?? seed.eventCooldowns,
           eventHistory: current.eventHistory ?? seed.eventHistory,
           effectHistory: current.effectHistory ?? seed.effectHistory,
-          unlockedMilestones: current.unlockedMilestones ?? seed.unlockedMilestones,
-        } satisfies PersistedStateV2;
+          unlockedMilestones:
+            current.unlockedMilestones ?? seed.unlockedMilestones,
+          saveVersion: current.saveVersion ?? seed.saveVersion,
+          history: (current as Partial<PersistedStateV3>).history ?? seed.history,
+          gamePhase:
+            (current as Partial<PersistedStateV3>).gamePhase ?? "playing",
+          finalId: (current as Partial<PersistedStateV3>).finalId ?? null,
+          finalText: (current as Partial<PersistedStateV3>).finalText ?? null,
+          unlockedAchievements:
+            (current as Partial<PersistedStateV3>).unlockedAchievements ??
+            seed.unlockedAchievements,
+        } satisfies PersistedStateV3;
       },
       partialize: (state) => ({
         character: state.character,
         pendingEffects: state.pendingEffects,
+        archetypeId: state.archetypeId,
+        flags: state.flags,
         currentEventId: state.currentEventId,
         eventCooldowns: state.eventCooldowns,
         eventHistory: state.eventHistory,
         effectHistory: state.effectHistory,
         unlockedMilestones: state.unlockedMilestones,
+        saveVersion: state.saveVersion,
+        history: state.history,
+        gamePhase: state.gamePhase,
+        finalId: state.finalId,
+        finalText: state.finalText,
+        unlockedAchievements: state.unlockedAchievements,
       }),
     },
   ),

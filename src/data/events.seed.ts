@@ -1,7 +1,10 @@
 import { delta } from "./effects";
+import type { EffectBundle } from "./effects";
 import type { GameEventDefinition } from "./events";
+import type { CharacterVariableKey } from "./character";
+import type { ArchetypeId } from "./archetypes";
 
-export const EVENT_CATALOG: readonly GameEventDefinition[] = [
+const BASE_EVENT_CATALOG: readonly GameEventDefinition[] = [
   {
     id: "starter-shift",
     title: "Turno Extra",
@@ -31,6 +34,7 @@ export const EVENT_CATALOG: readonly GameEventDefinition[] = [
       {
         id: "study",
         label: "Studia",
+        timeCost: 2,
         immediate: [delta("skills", 4), delta("happiness", -1), delta("money", -4)],
       },
       {
@@ -50,6 +54,7 @@ export const EVENT_CATALOG: readonly GameEventDefinition[] = [
       {
         id: "train-hard",
         label: "Allenati duro",
+        timeCost: 2,
         immediate: [delta("health", 6), delta("happiness", -2), delta("money", -3)],
         delayed: [{ delayTurns: 2, bundle: [delta("happiness", 3)] }],
       },
@@ -70,6 +75,7 @@ export const EVENT_CATALOG: readonly GameEventDefinition[] = [
       {
         id: "go-networking",
         label: "Partecipa",
+        timeCost: 1,
         immediate: [delta("relationships", 4), delta("career", 1), delta("money", -5)],
         scaled: [{ target: "money", base: 3, scaleBy: "skills", factor: 0.08 }],
       },
@@ -94,6 +100,7 @@ export const EVENT_CATALOG: readonly GameEventDefinition[] = [
       {
         id: "take-project",
         label: "Accetta la sfida",
+        timeCost: 2,
         immediate: [delta("career", 6), delta("money", 15), delta("health", -4)],
       },
       {
@@ -114,11 +121,13 @@ export const EVENT_CATALOG: readonly GameEventDefinition[] = [
       {
         id: "talk-openly",
         label: "Parla apertamente",
+        timeCost: 1,
         immediate: [delta("relationships", 5), delta("happiness", -1)],
       },
       {
         id: "avoid-topic",
         label: "Evita il tema",
+        timeCost: 1,
         immediate: [delta("relationships", -4), delta("happiness", -2)],
         delayed: [{ delayTurns: 1, bundle: [delta("happiness", -2)] }],
       },
@@ -135,11 +144,13 @@ export const EVENT_CATALOG: readonly GameEventDefinition[] = [
       {
         id: "rest-day",
         label: "Prenditi una pausa",
+        timeCost: 1,
         immediate: [delta("health", 8), delta("money", -4)],
       },
       {
         id: "push-through",
         label: "Ignora e continua",
+        timeCost: 2,
         immediate: [delta("money", 8), delta("health", -5), delta("happiness", -2)],
       },
     ],
@@ -158,6 +169,7 @@ export const EVENT_CATALOG: readonly GameEventDefinition[] = [
       {
         id: "accept-mentoring",
         label: "Accetta mentoring",
+        timeCost: 2,
         immediate: [delta("skills", 5), delta("career", 3), delta("money", -6)],
       },
       {
@@ -454,5 +466,250 @@ export const EVENT_CATALOG: readonly GameEventDefinition[] = [
       },
     ],
   },
+];
+
+function effectsAdd(pairs: Array<[CharacterVariableKey, number]>): EffectBundle {
+  return pairs.map(([target, value]) => delta(target, value));
+}
+
+const EXTRA_EVENT_CATALOG: GameEventDefinition[] = [];
+
+// --- Connettori narrativi (flags) ---
+EXTRA_EVENT_CATALOG.push(
+  {
+    id: "partner-meeting",
+    title: "Incontro di Persona",
+    description: "Una conversazione inattesa accende qualcosa.",
+    tags: ["social", "career"],
+    weight: 6,
+    cooldownTurns: 3,
+    choices: [
+      {
+        id: "chat",
+        label: "Continua a parlare",
+        immediate: effectsAdd([
+          ["happiness", 3],
+          ["relationships", 6],
+        ]),
+        setsFlags: ["has_partner"],
+        nextEventId: "partner-afterglow",
+      },
+      {
+        id: "keep-distance",
+        label: "Mantieni distanza",
+        immediate: effectsAdd([
+          ["happiness", 1],
+          ["relationships", -1],
+        ]),
+      },
+    ],
+  },
+  {
+    id: "partner-afterglow",
+    title: "Un piccolo passo",
+    description: "La relazione cresce, ma richiede attenzione.",
+    tags: ["social"],
+    weight: 5,
+    cooldownTurns: 2,
+    requirements: { flags: ["has_partner"] },
+    choices: [
+      {
+        id: "be-there",
+        label: "Cerca di esserci",
+        immediate: effectsAdd([
+          ["happiness", 2],
+          ["relationships", 4],
+        ]),
+      },
+      {
+        id: "overwork",
+        label: "Rimani troppo sul lavoro",
+        immediate: effectsAdd([
+          ["career", 1],
+          ["happiness", -2],
+          ["relationships", -2],
+        ]),
+        delayed: [{ delayTurns: 1, bundle: effectsAdd([["happiness", -1]]) }],
+      },
+    ],
+  },
+);
+
+EXTRA_EVENT_CATALOG.push({
+  id: "midseason-review",
+  title: "Revisione di Metà Stagione (scripted)",
+  description: "Un punto di controllo: cosa hai costruito finora?",
+  tags: ["career"],
+  type: "scripted",
+  triggerTurn: 12,
+  weight: 4,
+  cooldownTurns: 999,
+  choices: [
+    {
+      id: "double-down",
+      label: "Raddoppia",
+      immediate: effectsAdd([
+        ["career", 6],
+        ["money", 8],
+        ["happiness", -2],
+      ]),
+    },
+    {
+      id: "stabilize",
+      label: "Stabilizza e migliora",
+      immediate: effectsAdd([
+        ["skills", 4],
+        ["happiness", 2],
+        ["relationships", 1],
+      ]),
+    },
+  ],
+});
+
+// --- Eventi “job related” che dipendono da flag fired_from_job ---
+EXTRA_EVENT_CATALOG.push({
+  id: "burnout-risk",
+  title: "Rischio di Burnout",
+  description: "Pressione e stanchezza aumentano: potresti perdere il posto.",
+  tags: ["career", "health"],
+  weight: 7,
+  cooldownTurns: 3,
+  requirements: { archetype: ["worker"] },
+  choices: [
+    {
+      id: "slow-down",
+      label: "Rallenta",
+      immediate: effectsAdd([
+        ["health", 8],
+        ["happiness", 2],
+        ["career", -2],
+      ]),
+    },
+    {
+      id: "push-until",
+      label: "Spingi fino a crollare",
+      immediate: effectsAdd([
+        ["career", 3],
+        ["happiness", -3],
+        ["health", -10],
+      ]),
+      delayed: [
+        { delayTurns: 2, bundle: effectsAdd([["money", -10]]) },
+      ],
+      setsFlags: ["fired_from_job"],
+    },
+  ],
+});
+
+EXTRA_EVENT_CATALOG.push({
+  id: "job-search-week",
+  title: "Settimana di Ricerca Lavoro",
+  description: "Ricominci da zero: aggiornare competenze e rete è essenziale.",
+  tags: ["career", "social", "finance"],
+  weight: 6,
+  cooldownTurns: 3,
+  requirements: { archetype: ["worker"], flags: ["fired_from_job"] },
+  choices: [
+    {
+      id: "network",
+      label: "Puntare sulla rete",
+      immediate: effectsAdd([
+        ["relationships", 6],
+        ["skills", 2],
+        ["happiness", 1],
+      ]),
+      delayed: [{ delayTurns: 2, bundle: effectsAdd([["money", 14]]) }],
+    },
+    {
+      id: "apply-many",
+      label: "Candidati ovunque",
+      immediate: effectsAdd([
+        ["career", -1],
+        ["happiness", -1],
+        ["money", 3],
+      ]),
+    },
+  ],
+});
+
+// --- Pool generico di eventi per rigiocabilità (archetype gated) ---
+// Crea rapidamente eventi additivi con piccole differenze per rendere le partite diverse.
+const ARCS: ArchetypeId[] = ["student", "worker", "artist"];
+for (const arc of ARCS) {
+  for (let n = 1; n <= 12; n += 1) {
+    const id = `${arc}-arc-event-${n}`;
+    const title =
+      arc === "student"
+        ? `Giornata di Studio #${n}`
+        : arc === "worker"
+          ? `Giornata Lavorativa #${n}`
+          : `Ritmo Creativo #${n}`;
+    const desc =
+      arc === "student"
+        ? "Preparazione, piccoli progressi e qualche imprevisto."
+        : arc === "worker"
+          ? "Compiti, pressione e opportunità quotidiane."
+          : "Ispirazione, richieste e gesti che contano.";
+
+    const immediate = arc === "student"
+      ? effectsAdd([
+          ["skills", 2 + (n % 3)],
+          ["happiness", 1 - (n % 4)],
+          ["money", -2],
+        ])
+      : arc === "worker"
+        ? effectsAdd([
+            ["career", 2 + (n % 3)],
+            ["money", 4 + (n % 4)],
+            ["happiness", 0 - (n % 3)],
+          ])
+        : effectsAdd([
+            ["relationships", 2 + (n % 4)],
+            ["happiness", 2 + (n % 3) - 2],
+            ["career", 1],
+          ]);
+
+    const delayed =
+      n % 2 === 0
+        ? [{ delayTurns: 2, bundle: effectsAdd([["happiness", 2 - (n % 5)]]) }]
+        : undefined;
+
+    EXTRA_EVENT_CATALOG.push({
+      id,
+      title,
+      description: desc,
+      tags:
+        arc === "student"
+          ? ["career", "health", "skills"]
+          : arc === "worker"
+            ? ["career", "finance", "health"]
+            : ["social", "career"],
+      type: "random",
+      weight: 4 + (n % 3),
+      cooldownTurns: 2 + (n % 3),
+      requirements: { archetype: [arc] },
+      choices: [
+        {
+          id: `${id}-opt-a`,
+          label: "Approccio diretto",
+          immediate,
+          delayed,
+        },
+        {
+          id: `${id}-opt-b`,
+          label: "Approccio prudente",
+          immediate: effectsAdd([
+            ["happiness", 2],
+            ["health", 2 - (n % 2)],
+          ]),
+        },
+      ],
+    });
+  }
+}
+
+export const EVENT_CATALOG: readonly GameEventDefinition[] = [
+  ...BASE_EVENT_CATALOG,
+  ...EXTRA_EVENT_CATALOG,
 ];
 

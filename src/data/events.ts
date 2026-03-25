@@ -3,6 +3,18 @@ import type { EffectBundle } from "./effects";
 
 export type ConditionOperator = "gte" | "lte" | "gt" | "lt" | "eq" | "neq";
 
+export type GameEventType = "scripted" | "random";
+
+export type GameEventRequirements = {
+  readonly minHealth?: number;
+  readonly maxHealth?: number;
+  readonly minMoney?: number;
+  readonly archetype?: readonly string[];
+  readonly flags?: readonly string[];
+  readonly minTurn?: number;
+  readonly maxTurn?: number;
+};
+
 export type StatCondition = {
   readonly stat: CharacterVariableKey;
   readonly op: ConditionOperator;
@@ -37,6 +49,11 @@ export type EventChoiceDefinition = {
   readonly delayed?: readonly DelayedEffectDefinition[];
   readonly conditional?: readonly ConditionalEffectDefinition[];
   readonly scaled?: readonly ScaledEffectDefinition[];
+  readonly setsFlags?: readonly string[];
+  readonly removesFlags?: readonly string[];
+  readonly nextEventId?: string;
+  /** Quanti turni di gioco “consuma” la scelta. Default: 1. */
+  readonly timeCost?: number;
 };
 
 export type GameEventDefinition = {
@@ -47,6 +64,9 @@ export type GameEventDefinition = {
   readonly weight: number;
   readonly cooldownTurns: number;
   readonly conditions?: readonly EventCondition[];
+  readonly requirements?: GameEventRequirements;
+  readonly type?: GameEventType;
+  readonly triggerTurn?: number;
   readonly choices: readonly EventChoiceDefinition[];
 };
 
